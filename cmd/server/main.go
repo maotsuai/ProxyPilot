@@ -204,9 +204,6 @@ func main() {
 	flag.BoolVar(&runAsService, "service", false, "Run as Windows service (internal)")
 	flag.StringVar(&serviceCmd, "service-cmd", "", "Service command: install, uninstall, start, stop, status")
 
-	// TUI flag
-	flag.BoolVar(&launchTUI, "tui", false, "Launch interactive terminal dashboard")
-
 	flag.CommandLine.Usage = func() {
 		out := flag.CommandLine.Output()
 		_, _ = fmt.Fprintf(out, "Usage of %s\n", os.Args[0])
