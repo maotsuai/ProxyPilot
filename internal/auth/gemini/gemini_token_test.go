@@ -86,8 +86,15 @@ func TestGeminiTokenStorage_SaveTokenToFile(t *testing.T) {
 	}
 
 	// Verify file exists
-	if _, err := os.Stat(authPath); os.IsNotExist(err) {
+	info, err := os.Stat(authPath)
+	if os.IsNotExist(err) {
 		t.Fatal("token file was not created")
+	}
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %v, want %v", got, os.FileMode(0o600))
 	}
 
 	// Verify type was set

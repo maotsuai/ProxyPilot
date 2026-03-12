@@ -4,10 +4,7 @@
 package copilot
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 )
@@ -74,19 +71,7 @@ type DeviceCodeResponse struct {
 func (ts *CopilotTokenStorage) SaveTokenToFile(authFilePath string) error {
 	misc.LogSavingCredentials(authFilePath)
 	ts.Type = "github-copilot"
-	if err := os.MkdirAll(filepath.Dir(authFilePath), 0700); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
-	}
-
-	f, err := os.Create(authFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to create token file: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	if err = json.NewEncoder(f).Encode(ts); err != nil {
+	if err := misc.WriteJSONFileSecure(authFilePath, ts, false); err != nil {
 		return fmt.Errorf("failed to write token to file: %w", err)
 	}
 	return nil

@@ -64,7 +64,7 @@ func (r *FileTokenRepository) FindOldestUnverified(limit int) []*Token {
 			return nil
 		}
 
-		token, err := r.readTokenFile(path)
+		token, err := r.readTokenFile(path, baseDir)
 		if err != nil {
 			log.Debugf("token repository: failed to read token file %s: %v", path, err)
 			return nil
@@ -111,10 +111,9 @@ func (r *FileTokenRepository) UpdateToken(token *Token) error {
 		return fmt.Errorf("token repository: base directory not configured")
 	}
 
-	// 构建文件路径
-	filePath := filepath.Join(baseDir, token.ID)
-	if !strings.HasSuffix(filePath, ".json") {
-		filePath += ".json"
+	filePath, err := resolveTokenFilePath(baseDir, token.ID)
+	if err != nil {
+		return fmt.Errorf("token repository: resolve file path failed: %w", err)
 	}
 
 	// 读取现有文件内容
@@ -169,8 +168,31 @@ func (r *FileTokenRepository) UpdateToken(token *Token) error {
 	return nil
 }
 
+func resolveTokenFilePath(baseDir, tokenID string) (string, error) {
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return "", fmt.Errorf("token id is empty")
+	}
+	if filepath.IsAbs(tokenID) {
+		return "", fmt.Errorf("absolute token ids are not supported")
+	}
+	cleanID := filepath.Clean(tokenID)
+	path := filepath.Join(baseDir, cleanID)
+	rel, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("token path escapes base directory")
+	}
+	if !strings.HasSuffix(strings.ToLower(path), ".json") {
+		path += ".json"
+	}
+	return path, nil
+}
+
 // readTokenFile 从文件读取 token
-func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
+func (r *FileTokenRepository) readTokenFile(path, baseDir string) (*Token, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -190,12 +212,16 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 	// 检查 auth_method (case-insensitive comparison to handle "IdC", "IDC", "idc", etc.)
 	authMethod, _ := metadata["auth_method"].(string)
 	authMethod = strings.ToLower(authMethod)
-	if authMethod != "idc" && authMethod != "builder-id" {
-		return nil, nil // 只处理 IDC 和 Builder ID token
+	if authMethod == "" {
+		return nil, nil
 	}
 
+	tokenID, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		return nil, err
+	}
 	token := &Token{
-		ID:         filepath.Base(path),
+		ID:         tokenID,
 		AuthMethod: authMethod,
 	}
 
@@ -260,7 +286,7 @@ func (r *FileTokenRepository) ListKiroTokens(ctx context.Context) ([]*Token, err
 			return nil
 		}
 
-		token, err := r.readTokenFile(path)
+		token, err := r.readTokenFile(path, baseDir)
 		if err != nil {
 			return nil
 		}

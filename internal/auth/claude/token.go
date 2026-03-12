@@ -4,10 +4,7 @@
 package claude
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 )
@@ -61,28 +58,13 @@ func (ts *ClaudeTokenStorage) SaveTokenToFile(authFilePath string) error {
 	misc.LogSavingCredentials(authFilePath)
 	ts.Type = "claude"
 
-	// Create directory structure if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(authFilePath), 0700); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
-	}
-
-	// Create the token file
-	f, err := os.Create(authFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to create token file: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
 	// Merge metadata using helper
 	data, errMerge := misc.MergeMetadata(ts, ts.Metadata)
 	if errMerge != nil {
 		return fmt.Errorf("failed to merge metadata: %w", errMerge)
 	}
 
-	// Encode and write the token data as JSON
-	if err = json.NewEncoder(f).Encode(data); err != nil {
+	if err := misc.WriteJSONFileSecure(authFilePath, data, false); err != nil {
 		return fmt.Errorf("failed to write token to file: %w", err)
 	}
 	return nil

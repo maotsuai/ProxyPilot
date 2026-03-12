@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/browser"
@@ -1116,6 +1117,12 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 	port := listener.Addr().(*net.TCPAddr).Port
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d%s", port, authCodeCallbackPath)
 	resultChan := make(chan AuthCodeCallbackResult, 1)
+	callbackReceived := make(chan struct{})
+	var callbackOnce sync.Once
+	sendResult := func(result AuthCodeCallbackResult) {
+		resultChan <- result
+		callbackOnce.Do(func() { close(callbackReceived) })
+	}
 
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
@@ -1134,7 +1141,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 			fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Login Failed</title></head>
 <body><h1>Login Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>`, html.EscapeString(errParam))
-			resultChan <- AuthCodeCallbackResult{Error: errParam}
+			sendResult(AuthCodeCallbackResult{Error: errParam})
 			return
 		}
 
@@ -1143,7 +1150,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 			fmt.Fprint(w, `<!DOCTYPE html>
 <html><head><title>Login Failed</title></head>
 <body><h1>Login Failed</h1><p>Invalid state parameter</p><p>You can close this window.</p></body></html>`)
-			resultChan <- AuthCodeCallbackResult{Error: "state mismatch"}
+			sendResult(AuthCodeCallbackResult{Error: "state mismatch"})
 			return
 		}
 
@@ -1151,7 +1158,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 <html><head><title>Login Successful</title></head>
 <body><h1>Login Successful!</h1><p>You can close this window and return to the terminal.</p>
 <script>window.close();</script></body></html>`)
-		resultChan <- AuthCodeCallbackResult{Code: code, State: state}
+		sendResult(AuthCodeCallbackResult{Code: code, State: state})
 	})
 
 	server.Handler = mux
@@ -1166,7 +1173,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 		select {
 		case <-ctx.Done():
 		case <-time.After(10 * time.Minute):
-		case <-resultChan:
+		case <-callbackReceived:
 		}
 		_ = server.Shutdown(context.Background())
 	}()

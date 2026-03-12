@@ -378,9 +378,17 @@ func TestToken_SaveTokenToFile(t *testing.T) {
 
 			if !tt.wantErr {
 				// Verify file was created
-				if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				info, err := os.Stat(filePath)
+				if os.IsNotExist(err) {
 					t.Error("Token file was not created")
 					return
+				}
+				if err != nil {
+					t.Errorf("Stat() error = %v", err)
+					return
+				}
+				if got := info.Mode().Perm(); got != 0o600 {
+					t.Errorf("file mode = %v, want %v", got, os.FileMode(0o600))
 				}
 
 				// Verify file contents can be parsed back

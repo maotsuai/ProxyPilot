@@ -87,6 +87,27 @@ func TestRoundRobinSelectorPick_PriorityBuckets(t *testing.T) {
 	}
 }
 
+func TestRoundRobinSelectorPick_PriorityStructFieldWins(t *testing.T) {
+	t.Parallel()
+
+	selector := &RoundRobinSelector{}
+	auths := []*Auth{
+		{ID: "low", Priority: 1},
+		{ID: "high", Priority: 9},
+	}
+
+	got, err := selector.Pick(context.Background(), "mixed", "", cliproxyexecutor.Options{}, auths)
+	if err != nil {
+		t.Fatalf("Pick() error = %v", err)
+	}
+	if got == nil {
+		t.Fatal("Pick() auth = nil")
+	}
+	if got.ID != "high" {
+		t.Fatalf("Pick() auth.ID = %q, want %q", got.ID, "high")
+	}
+}
+
 func TestFillFirstSelectorPick_PriorityFallbackCooldown(t *testing.T) {
 	t.Parallel()
 

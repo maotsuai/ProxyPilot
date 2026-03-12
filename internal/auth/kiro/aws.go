@@ -433,8 +433,7 @@ func GenerateTokenFileName(tokenData *KiroTokenData) string {
 
 	// Priority 1: Use email if available
 	if tokenData.Email != "" {
-		// Sanitize email for filename (replace @ and . with -)
-		sanitizedEmail := tokenData.Email
+		sanitizedEmail := SanitizeEmailForFilename(tokenData.Email)
 		sanitizedEmail = strings.ReplaceAll(sanitizedEmail, "@", "-")
 		sanitizedEmail = strings.ReplaceAll(sanitizedEmail, ".", "-")
 		return fmt.Sprintf("kiro-%s-%s.json", authMethod, sanitizedEmail)

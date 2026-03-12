@@ -194,7 +194,9 @@ func (r *BackgroundRefresher) refreshSingle(ctx context.Context, token *Token) {
 	}
 
 	token.AccessToken = newTokenData.AccessToken
-	token.RefreshToken = newTokenData.RefreshToken
+	if newRefreshToken := strings.TrimSpace(newTokenData.RefreshToken); newRefreshToken != "" {
+		token.RefreshToken = newRefreshToken
+	}
 	token.LastVerified = time.Now()
 
 	if newTokenData.ExpiresAt != "" {

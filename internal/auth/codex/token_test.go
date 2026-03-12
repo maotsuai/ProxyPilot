@@ -304,9 +304,17 @@ func TestCodexTokenStorage_SaveTokenToFile(t *testing.T) {
 
 			if !tt.wantErr {
 				// Verify the file was created
-				if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				info, err := os.Stat(filePath)
+				if os.IsNotExist(err) {
 					t.Errorf("SaveTokenToFile() file was not created at %s", filePath)
 					return
+				}
+				if err != nil {
+					t.Errorf("Stat() error = %v", err)
+					return
+				}
+				if got := info.Mode().Perm(); got != 0o600 {
+					t.Errorf("file mode = %v, want %v", got, os.FileMode(0o600))
 				}
 
 				// Read and verify content

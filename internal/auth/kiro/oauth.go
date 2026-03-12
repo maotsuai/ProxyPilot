@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
@@ -105,6 +106,12 @@ func (o *KiroOAuth) startCallbackServer(ctx context.Context, expectedState strin
 	// Use http scheme for local callback server
 	redirectURI := fmt.Sprintf("http://localhost:%d/oauth/callback", port)
 	resultChan := make(chan AuthResult, 1)
+	callbackReceived := make(chan struct{})
+	var callbackOnce sync.Once
+	sendResult := func(result AuthResult) {
+		resultChan <- result
+		callbackOnce.Do(func() { close(callbackReceived) })
+	}
 
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
@@ -120,7 +127,7 @@ func (o *KiroOAuth) startCallbackServer(ctx context.Context, expectedState strin
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, `<html><body><h1>Login Failed</h1><p>%s</p><p>You can close this window.</p></body></html>`, html.EscapeString(errParam))
-			resultChan <- AuthResult{Error: errParam}
+			sendResult(AuthResult{Error: errParam})
 			return
 		}
 
@@ -128,13 +135,13 @@ func (o *KiroOAuth) startCallbackServer(ctx context.Context, expectedState strin
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `<html><body><h1>Login Failed</h1><p>Invalid state parameter</p><p>You can close this window.</p></body></html>`)
-			resultChan <- AuthResult{Error: "state mismatch"}
+			sendResult(AuthResult{Error: "state mismatch"})
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<html><body><h1>Login Successful!</h1><p>You can close this window and return to the terminal.</p></body></html>`)
-		resultChan <- AuthResult{Code: code, State: state}
+		sendResult(AuthResult{Code: code, State: state})
 	})
 
 	server.Handler = mux
@@ -149,7 +156,7 @@ func (o *KiroOAuth) startCallbackServer(ctx context.Context, expectedState strin
 		select {
 		case <-ctx.Done():
 		case <-time.After(authTimeout):
-		case <-resultChan:
+		case <-callbackReceived:
 		}
 		_ = server.Shutdown(context.Background())
 	}()

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,18 +70,18 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	type metadataSetter interface {
 		SetMetadata(map[string]any)
 	}
+	metadata := persistentMetadata(auth)
 
 	switch {
 	case auth.Storage != nil:
 		if setter, ok := auth.Storage.(metadataSetter); ok {
-			setter.SetMetadata(auth.Metadata)
+			setter.SetMetadata(metadata)
 		}
 		if err = auth.Storage.SaveTokenToFile(path); err != nil {
 			return "", err
 		}
-	case auth.Metadata != nil:
-		auth.Metadata["disabled"] = auth.Disabled
-		raw, errMarshal := json.Marshal(auth.Metadata)
+	case metadata != nil:
+		raw, errMarshal := json.Marshal(metadata)
 		if errMarshal != nil {
 			return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
 		}
@@ -263,7 +264,101 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	if email, ok := metadata["email"].(string); ok && email != "" {
 		auth.Attributes["email"] = email
 	}
+	hydratePersistentAuthFields(auth, metadata)
 	return auth, nil
+}
+
+func persistentMetadata(auth *cliproxyauth.Auth) map[string]any {
+	if auth == nil {
+		return nil
+	}
+	metadata := make(map[string]any, len(auth.Metadata)+4)
+	for key, value := range auth.Metadata {
+		metadata[key] = value
+	}
+	metadata["disabled"] = auth.Disabled
+
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		metadata["prefix"] = prefix
+	} else {
+		delete(metadata, "prefix")
+	}
+	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+		metadata["proxy_url"] = proxyURL
+	} else {
+		delete(metadata, "proxy_url")
+	}
+	if auth.Priority != 0 {
+		metadata["priority"] = auth.Priority
+	} else {
+		delete(metadata, "priority")
+	}
+
+	if auth.Metadata == nil && len(metadata) == 1 && !auth.Disabled {
+		return nil
+	}
+	auth.Metadata = metadata
+	return metadata
+}
+
+func hydratePersistentAuthFields(auth *cliproxyauth.Auth, metadata map[string]any) {
+	if auth == nil || metadata == nil {
+		return
+	}
+	if prefix, ok := metadataString(metadata["prefix"]); ok {
+		auth.Prefix = prefix
+	}
+	if proxyURL, ok := metadataString(metadata["proxy_url"]); ok {
+		auth.ProxyURL = proxyURL
+	}
+	if priority, ok := metadataInt(metadata["priority"]); ok {
+		auth.Priority = priority
+		if auth.Attributes == nil {
+			auth.Attributes = make(map[string]string)
+		}
+		auth.Attributes["priority"] = strconv.Itoa(priority)
+	}
+}
+
+func metadataString(v any) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	return s, true
+}
+
+func metadataInt(v any) (int, bool) {
+	switch val := v.(type) {
+	case int:
+		return val, true
+	case int64:
+		return int(val), true
+	case float64:
+		return int(val), true
+	case json.Number:
+		i, err := val.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return 0, false
+		}
+		i, err := strconv.Atoi(val)
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+	default:
+		return 0, false
+	}
 }
 
 func (s *FileTokenStore) idFor(path, baseDir string) string {
