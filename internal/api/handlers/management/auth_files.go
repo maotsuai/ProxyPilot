@@ -530,23 +530,25 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "file must be .json"})
 			return
 		}
+		src, errOpen := file.Open()
+		if errOpen != nil {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("failed to read uploaded file: %v", errOpen)})
+			return
+		}
+		data, errRead := io.ReadAll(src)
+		_ = src.Close()
+		if errRead != nil {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("failed to read uploaded file: %v", errRead)})
+			return
+		}
 		dst := filepath.Join(h.cfg.AuthDir, name)
 		if !filepath.IsAbs(dst) {
 			if abs, errAbs := filepath.Abs(dst); errAbs == nil {
 				dst = abs
 			}
 		}
-		if errSave := c.SaveUploadedFile(file, dst); errSave != nil {
-			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to save file: %v", errSave)})
-			return
-		}
-		data, errRead := os.ReadFile(dst)
-		if errRead != nil {
-			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read saved file: %v", errRead)})
-			return
-		}
-		if errReg := h.registerAuthFromFile(ctx, dst, data); errReg != nil {
-			c.JSON(500, gin.H{"error": errReg.Error()})
+		if errCommit := h.commitUploadedAuthFile(ctx, dst, data); errCommit != nil {
+			c.JSON(500, gin.H{"error": errCommit.Error()})
 			return
 		}
 		c.JSON(200, gin.H{"status": "ok"})
@@ -572,11 +574,7 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 			dst = abs
 		}
 	}
-	if errWrite := os.WriteFile(dst, data, 0o600); errWrite != nil {
-		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to write file: %v", errWrite)})
-		return
-	}
-	if err = h.registerAuthFromFile(ctx, dst, data); err != nil {
+	if err = h.commitUploadedAuthFile(ctx, dst, data); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -713,19 +711,53 @@ func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []
 	if h.authManager == nil {
 		return nil
 	}
-	if path == "" {
-		return fmt.Errorf("auth path is empty")
+	auth, hasLastRefresh, err := h.buildAuthFromFileData(path, data)
+	if err != nil {
+		return err
+	}
+	return h.registerManagedAuth(ctx, auth, hasLastRefresh)
+}
+
+func (h *Handler) commitUploadedAuthFile(ctx context.Context, path string, data []byte) error {
+	if _, _, err := h.buildAuthFromFileData(path, data); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("failed to prepare auth dir: %w", err)
+	}
+	previousData, errRead := os.ReadFile(path)
+	hadPrevious := errRead == nil
+	if errRead != nil && !os.IsNotExist(errRead) {
+		return fmt.Errorf("failed to read existing auth file: %w", errRead)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	if err := h.registerAuthFromFile(ctx, path, data); err != nil {
+		if hadPrevious {
+			_ = os.WriteFile(path, previousData, 0o600)
+		} else {
+			_ = os.Remove(path)
+		}
+		return err
+	}
+	return nil
+}
+
+func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Auth, bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false, fmt.Errorf("auth path is empty")
 	}
 	if data == nil {
 		var err error
 		data, err = os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to read auth file: %w", err)
+			return nil, false, fmt.Errorf("failed to read auth file: %w", err)
 		}
 	}
 	metadata := make(map[string]any)
 	if err := json.Unmarshal(data, &metadata); err != nil {
-		return fmt.Errorf("invalid auth file: %w", err)
+		return nil, false, fmt.Errorf("invalid auth file: %w", err)
 	}
 	provider, _ := metadata["type"].(string)
 	if provider == "" {
@@ -756,10 +788,29 @@ func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
+	if prefix, ok := authStringMetadata(metadata["prefix"]); ok {
+		auth.Prefix = prefix
+		auth.Attributes["prefix"] = prefix
+	}
+	if proxyURL, ok := authStringMetadata(metadata["proxy_url"]); ok {
+		auth.ProxyURL = proxyURL
+		auth.Attributes["proxy_url"] = proxyURL
+	}
+	if priority, ok := authIntMetadata(metadata["priority"]); ok {
+		auth.Priority = priority
+		auth.Attributes["priority"] = strconv.Itoa(priority)
+	}
 	if hasLastRefresh {
 		auth.LastRefreshedAt = lastRefresh
 	}
-	if existing, ok := h.authManager.GetByID(authID); ok {
+	return auth, hasLastRefresh, nil
+}
+
+func (h *Handler) registerManagedAuth(ctx context.Context, auth *coreauth.Auth, hasLastRefresh bool) error {
+	if h.authManager == nil {
+		return nil
+	}
+	if existing, ok := h.authManager.GetByID(auth.ID); ok {
 		auth.CreatedAt = existing.CreatedAt
 		if !hasLastRefresh {
 			auth.LastRefreshedAt = existing.LastRefreshedAt
@@ -887,20 +938,52 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 	changed := false
 	if req.Prefix != nil {
 		targetAuth.Prefix = *req.Prefix
+		if targetAuth.Metadata == nil {
+			targetAuth.Metadata = make(map[string]any)
+		}
+		if targetAuth.Attributes == nil {
+			targetAuth.Attributes = make(map[string]string)
+		}
+		if targetAuth.Prefix == "" {
+			delete(targetAuth.Metadata, "prefix")
+			delete(targetAuth.Attributes, "prefix")
+		} else {
+			targetAuth.Metadata["prefix"] = targetAuth.Prefix
+			targetAuth.Attributes["prefix"] = targetAuth.Prefix
+		}
 		changed = true
 	}
 	if req.ProxyURL != nil {
 		targetAuth.ProxyURL = *req.ProxyURL
+		if targetAuth.Metadata == nil {
+			targetAuth.Metadata = make(map[string]any)
+		}
+		if targetAuth.Attributes == nil {
+			targetAuth.Attributes = make(map[string]string)
+		}
+		if targetAuth.ProxyURL == "" {
+			delete(targetAuth.Metadata, "proxy_url")
+			delete(targetAuth.Attributes, "proxy_url")
+		} else {
+			targetAuth.Metadata["proxy_url"] = targetAuth.ProxyURL
+			targetAuth.Attributes["proxy_url"] = targetAuth.ProxyURL
+		}
 		changed = true
 	}
 	if req.Priority != nil {
 		if targetAuth.Metadata == nil {
 			targetAuth.Metadata = make(map[string]any)
 		}
+		if targetAuth.Attributes == nil {
+			targetAuth.Attributes = make(map[string]string)
+		}
+		targetAuth.Priority = *req.Priority
 		if *req.Priority == 0 {
 			delete(targetAuth.Metadata, "priority")
+			delete(targetAuth.Attributes, "priority")
 		} else {
 			targetAuth.Metadata["priority"] = *req.Priority
+			targetAuth.Attributes["priority"] = strconv.Itoa(*req.Priority)
 		}
 		changed = true
 	}
@@ -918,6 +1001,35 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func authStringMetadata(value any) (string, bool) {
+	s, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(s), true
+}
+
+func authIntMetadata(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 func (h *Handler) disableAuth(ctx context.Context, id string) {

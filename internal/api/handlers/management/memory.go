@@ -210,12 +210,11 @@ func (h *Handler) DeleteMemorySession(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 		return
 	}
-	session := strings.TrimSpace(c.Query("session"))
-	if session == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing session"})
+	store := memory.NewFileStore(base)
+	_, path, ok := resolveManagedMemorySession(c, store, c.Query("session"))
+	if !ok {
 		return
 	}
-	path := filepath.Join(base, "sessions", session)
 	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -289,12 +288,11 @@ func (h *Handler) ExportMemorySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "memory not configured"})
 		return
 	}
-	session := strings.TrimSpace(c.Query("session"))
-	if session == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing session"})
+	store := memory.NewFileStore(base)
+	session, dir, ok := resolveManagedMemorySession(c, store, c.Query("session"))
+	if !ok {
 		return
 	}
-	dir := filepath.Join(base, "sessions", session)
 	if _, err := os.Stat(dir); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
@@ -357,9 +355,9 @@ func (h *Handler) ImportMemorySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart form required"})
 		return
 	}
-	session := strings.TrimSpace(c.Query("session"))
-	if session == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing session"})
+	store := memory.NewFileStore(base)
+	_, dest, ok := resolveManagedMemorySession(c, store, c.Query("session"))
+	if !ok {
 		return
 	}
 	replace := strings.EqualFold(strings.TrimSpace(c.Query("replace")), "true")
@@ -388,7 +386,6 @@ func (h *Handler) ImportMemorySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid zip"})
 		return
 	}
-	dest := filepath.Join(base, "sessions", session)
 	if replace {
 		_ = os.RemoveAll(dest)
 	}
@@ -459,4 +456,22 @@ func anchorAppendOnlyEnabled() bool {
 		}
 	}
 	return true
+}
+
+func resolveManagedMemorySession(c *gin.Context, store *memory.FileStore, rawSession string) (string, string, bool) {
+	session := strings.TrimSpace(rawSession)
+	if session == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing session"})
+		return "", "", false
+	}
+	if strings.Contains(session, "..") || strings.ContainsAny(session, `/\`) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session"})
+		return "", "", false
+	}
+	dir := store.SessionDir(session)
+	if dir == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve session path"})
+		return "", "", false
+	}
+	return filepath.Base(dir), dir, true
 }

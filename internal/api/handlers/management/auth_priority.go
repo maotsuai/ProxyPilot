@@ -2,6 +2,7 @@ package management
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,19 @@ func (h *Handler) SetAuthPriority(c *gin.Context) {
 	}
 
 	auth.Priority = *req.Priority
+	if auth.Metadata == nil {
+		auth.Metadata = make(map[string]any)
+	}
+	if auth.Attributes == nil {
+		auth.Attributes = make(map[string]string)
+	}
+	if *req.Priority == 0 {
+		delete(auth.Metadata, "priority")
+		delete(auth.Attributes, "priority")
+	} else {
+		auth.Metadata["priority"] = *req.Priority
+		auth.Attributes["priority"] = strconv.Itoa(*req.Priority)
+	}
 	auth.UpdatedAt = time.Now()
 
 	updated, err := h.authManager.Update(c.Request.Context(), auth)

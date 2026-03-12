@@ -20,6 +20,7 @@ import (
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 )
 
 type attemptInfo struct {
@@ -37,6 +38,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
 	cfg                 *config.Config
+	committedCfg        *config.Config
 	configFilePath      string
 	mu                  sync.Mutex
 	attemptsMu          sync.Mutex
@@ -56,9 +58,11 @@ type Handler struct {
 func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Manager) *Handler {
 	envSecret, _ := os.LookupEnv("MANAGEMENT_PASSWORD")
 	envSecret = strings.TrimSpace(envSecret)
+	clonedCfg := cloneConfig(cfg)
 
 	h := &Handler{
-		cfg:                 cfg,
+		cfg:                 clonedCfg,
+		committedCfg:        cloneConfig(clonedCfg),
 		configFilePath:      configFilePath,
 		failedAttempts:      make(map[string]*attemptInfo),
 		authManager:         manager,
@@ -107,7 +111,13 @@ func NewHandlerWithoutConfigFilePath(cfg *config.Config, manager *coreauth.Manag
 }
 
 // SetConfig updates the in-memory config reference when the server hot-reloads.
-func (h *Handler) SetConfig(cfg *config.Config) { h.cfg = cfg }
+func (h *Handler) SetConfig(cfg *config.Config) {
+	clonedCfg := cloneConfig(cfg)
+	h.mu.Lock()
+	h.cfg = clonedCfg
+	h.committedCfg = cloneConfig(clonedCfg)
+	h.mu.Unlock()
+}
 
 // SetAuthManager updates the auth manager reference used by management endpoints.
 func (h *Handler) SetAuthManager(manager *coreauth.Manager) { h.authManager = manager }
@@ -277,18 +287,44 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 // persist saves the current in-memory config to disk.
 func (h *Handler) persist(c *gin.Context) bool {
 	h.mu.Lock()
+	current := cloneConfig(h.cfg)
+	h.mu.Unlock()
+	return h.persistConfig(c, current)
+}
+
+func (h *Handler) persistConfig(c *gin.Context, next *config.Config) bool {
+	if next == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "config unavailable"})
+		return false
+	}
+	next = cloneConfig(next)
+	h.mu.Lock()
 	defer h.mu.Unlock()
-	// Preserve comments when writing
-	if err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); err != nil {
+	if err := saveConfigAtomically(h.configFilePath, next); err != nil {
+		h.cfg = cloneConfig(h.committedCfg)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config: %v", err)})
 		return false
 	}
+	h.cfg = next
+	h.committedCfg = cloneConfig(next)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	return true
 }
 
+func (h *Handler) mutateConfig(c *gin.Context, mutate func(*config.Config)) bool {
+	h.mu.Lock()
+	next := cloneConfig(h.cfg)
+	h.mu.Unlock()
+	if next == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "config unavailable"})
+		return false
+	}
+	mutate(next)
+	return h.persistConfig(c, next)
+}
+
 // Helper methods for simple types
-func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
+func (h *Handler) updateBoolField(c *gin.Context, set func(*config.Config, bool)) {
 	var body struct {
 		Value *bool `json:"value"`
 	}
@@ -296,11 +332,12 @@ func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func(cfg *config.Config) {
+		set(cfg, *body.Value)
+	})
 }
 
-func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
+func (h *Handler) updateIntField(c *gin.Context, set func(*config.Config, int)) {
 	var body struct {
 		Value *int `json:"value"`
 	}
@@ -308,11 +345,12 @@ func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func(cfg *config.Config) {
+		set(cfg, *body.Value)
+	})
 }
 
-func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
+func (h *Handler) updateStringField(c *gin.Context, set func(*config.Config, string)) {
 	var body struct {
 		Value *string `json:"value"`
 	}
@@ -320,6 +358,58 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	h.mutateConfig(c, func(cfg *config.Config) {
+		set(cfg, *body.Value)
+	})
+}
+
+func cloneConfig(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		cloned := *cfg
+		return &cloned
+	}
+	var cloned config.Config
+	if err = yaml.Unmarshal(raw, &cloned); err != nil {
+		fallback := *cfg
+		return &fallback
+	}
+	return &cloned
+}
+
+func saveConfigAtomically(path string, cfg *config.Config) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("config file path not configured")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".config-save-*.yaml")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	if errClose := tmpFile.Close(); errClose != nil {
+		_ = os.Remove(tmpPath)
+		return errClose
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if err = os.WriteFile(tmpPath, original, info.Mode().Perm()); err != nil {
+		return err
+	}
+	if err = config.SaveConfigPreserveComments(tmpPath, cfg); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

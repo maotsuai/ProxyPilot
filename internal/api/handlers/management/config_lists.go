@@ -1088,7 +1088,7 @@ func (h *Handler) GetAmpUpstreamURL(c *gin.Context) {
 
 // PutAmpUpstreamURL updates the ampcode upstream URL.
 func (h *Handler) PutAmpUpstreamURL(c *gin.Context) {
-	h.updateStringField(c, func(v string) { h.cfg.AmpCode.UpstreamURL = strings.TrimSpace(v) })
+	h.updateStringField(c, func(cfg *config.Config, v string) { cfg.AmpCode.UpstreamURL = strings.TrimSpace(v) })
 }
 
 // DeleteAmpUpstreamURL clears the ampcode upstream URL.
@@ -1108,7 +1108,7 @@ func (h *Handler) GetAmpUpstreamAPIKey(c *gin.Context) {
 
 // PutAmpUpstreamAPIKey updates the ampcode upstream API key.
 func (h *Handler) PutAmpUpstreamAPIKey(c *gin.Context) {
-	h.updateStringField(c, func(v string) { h.cfg.AmpCode.UpstreamAPIKey = strings.TrimSpace(v) })
+	h.updateStringField(c, func(cfg *config.Config, v string) { cfg.AmpCode.UpstreamAPIKey = strings.TrimSpace(v) })
 }
 
 // DeleteAmpUpstreamAPIKey clears the ampcode upstream API key.
@@ -1128,7 +1128,7 @@ func (h *Handler) GetAmpRestrictManagementToLocalhost(c *gin.Context) {
 
 // PutAmpRestrictManagementToLocalhost updates the localhost restriction setting.
 func (h *Handler) PutAmpRestrictManagementToLocalhost(c *gin.Context) {
-	h.updateBoolField(c, func(v bool) { h.cfg.AmpCode.RestrictManagementToLocalhost = v })
+	h.updateBoolField(c, func(cfg *config.Config, v bool) { cfg.AmpCode.RestrictManagementToLocalhost = v })
 }
 
 // GetAmpModelMappings returns the ampcode model mappings.
@@ -1217,7 +1217,7 @@ func (h *Handler) GetAmpForceModelMappings(c *gin.Context) {
 
 // PutAmpForceModelMappings updates the force model mappings setting.
 func (h *Handler) PutAmpForceModelMappings(c *gin.Context) {
-	h.updateBoolField(c, func(v bool) { h.cfg.AmpCode.ForceModelMappings = v })
+	h.updateBoolField(c, func(cfg *config.Config, v bool) { cfg.AmpCode.ForceModelMappings = v })
 }
 
 // GetAmpUpstreamAPIKeys returns the ampcode upstream API keys mapping.

@@ -3,6 +3,8 @@ package management
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -117,9 +119,7 @@ func (h *Handler) processAPIKey(ctx context.Context, provider, key string, lineN
 	// Basic duplicate check could be added here if needed
 
 	timestamp := time.Now().Unix()
-	// Use a shortened key hash or prefix for filename to avoid leaking credentials in filenames
-	safeName := fmt.Sprintf("%s-%s", provider, key[:min(8, len(key))])
-	fileName := fmt.Sprintf("%s-%d.json", safeName, timestamp)
+	fileName := newImportedCredentialFileName(provider, timestamp)
 
 	record := &coreauth.Auth{
 		ID:       fileName,
@@ -161,9 +161,10 @@ func parseLines(r io.Reader) ([]string, error) {
 	return lines, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func newImportedCredentialFileName(provider string, timestamp int64) string {
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Sprintf("%s-import-%d.json", provider, timestamp)
 	}
-	return b
+	return fmt.Sprintf("%s-import-%d-%s.json", provider, timestamp, hex.EncodeToString(suffix))
 }
