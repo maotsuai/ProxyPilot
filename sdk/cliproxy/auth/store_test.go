@@ -582,3 +582,51 @@ func TestFileStore_Delete_NotFound(t *testing.T) {
 		})
 	}
 }
+
+func TestFileStore_Delete_AbsolutePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := auth.NewFileTokenStore()
+	store.SetBaseDir(tmpDir)
+
+	authRecord := &cliproxyauth.Auth{
+		ID:       "subdir/absolute-delete.json",
+		Provider: "test-provider",
+		Metadata: map[string]any{"type": "test-provider"},
+	}
+
+	ctx := context.Background()
+	if _, err := store.Save(ctx, authRecord); err != nil {
+		t.Fatalf("failed to save setup auth: %v", err)
+	}
+
+	absPath := filepath.Join(tmpDir, "subdir", "absolute-delete.json")
+	if err := store.Delete(ctx, absPath); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if _, err := os.Stat(absPath); !os.IsNotExist(err) {
+		t.Fatalf("expected file %s to be deleted", absPath)
+	}
+}
+
+func TestFileStore_Delete_RejectsTraversalOutsideBaseDir(t *testing.T) {
+	baseDir := t.TempDir()
+	parentDir := filepath.Dir(baseDir)
+	outsidePath := filepath.Join(parentDir, "outside-delete.json")
+	if err := os.WriteFile(outsidePath, []byte(`{"type":"test-provider"}`), 0o600); err != nil {
+		t.Fatalf("failed to create outside file: %v", err)
+	}
+
+	store := auth.NewFileTokenStore()
+	store.SetBaseDir(baseDir)
+
+	ctx := context.Background()
+	err := store.Delete(ctx, "../outside-delete.json")
+	if err == nil {
+		t.Fatalf("Delete() error = nil, want traversal rejection")
+	}
+
+	if _, statErr := os.Stat(outsidePath); statErr != nil {
+		t.Fatalf("expected outside file to remain, stat error = %v", statErr)
+	}
+}
