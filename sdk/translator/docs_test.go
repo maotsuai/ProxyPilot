@@ -23,11 +23,11 @@ func TestGenerateMarkdownDocs_WithTranslations(t *testing.T) {
 	reg.Register(FormatOpenAI, FormatClaude, func(model string, data []byte, stream bool) []byte {
 		return data
 	}, ResponseTransform{
-		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []string {
-			return []string{string(resp)}
+		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) [][]byte {
+			return [][]byte{append([]byte(nil), resp...)}
 		},
-		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) string {
-			return string(resp)
+		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []byte {
+			return append([]byte(nil), resp...)
 		},
 	})
 
@@ -84,8 +84,8 @@ func TestGenerateMermaidDiagram_WithTranslations(t *testing.T) {
 	reg.Register(FormatOpenAI, FormatClaude, func(model string, data []byte, stream bool) []byte {
 		return data
 	}, ResponseTransform{
-		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []string {
-			return []string{string(resp)}
+		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) [][]byte {
+			return [][]byte{append([]byte(nil), resp...)}
 		},
 	})
 
@@ -216,11 +216,11 @@ func TestGenerateMermaidDiagram_EdgeLabels(t *testing.T) {
 	reg.Register(FormatOpenAI, FormatClaude, func(model string, data []byte, stream bool) []byte {
 		return data
 	}, ResponseTransform{
-		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []string {
-			return []string{string(resp)}
+		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) [][]byte {
+			return [][]byte{append([]byte(nil), resp...)}
 		},
-		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) string {
-			return string(resp)
+		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []byte {
+			return append([]byte(nil), resp...)
 		},
 	})
 

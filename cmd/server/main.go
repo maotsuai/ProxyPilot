@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -139,6 +140,7 @@ func main() {
 	// TUI flag
 	var launchTUI bool
 	var standalone bool
+	var localModel bool
 
 	// Define command-line flags for different operation modes.
 	flag.BoolVar(&login, "login", false, "Login Google Account")
@@ -181,6 +183,7 @@ func main() {
 	flag.StringVar(&password, "password", "", "")
 	flag.BoolVar(&launchTUI, "tui", false, "Start with terminal management UI")
 	flag.BoolVar(&standalone, "standalone", false, "In TUI mode, start an embedded local server")
+	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalog only, skip remote model fetching")
 
 	flag.BoolVar(&showVersion, "version", false, "Show ProxyPilot version and exit")
 	flag.BoolVar(&showStatus, "status", false, "Show ProxyPilot status and exit")
@@ -813,9 +816,13 @@ func main() {
 			cmd.WaitForCloudDeploy()
 			return
 		}
-		// Start the main proxy service
-		// Auto-generate management password if not provided
-		// This enables browser-based webui access without requiring the -password flag
+
+		if localModel && (!launchTUI || standalone) {
+			log.Info("Local model mode: using embedded model catalog, remote model updates disabled")
+		}
+
+		// Auto-generate management password if not provided.
+		// This enables browser-based webui access without requiring the -password flag.
 		autoGenPassword := false
 		if password == "" {
 			if pw, err := desktopctl.GetManagementPassword(); err == nil {
@@ -826,14 +833,89 @@ func main() {
 				log.Warnf("failed to get management password: %v (webui may require manual authentication)", err)
 			}
 		}
-		// Use standalone mode (no keep-alive shutdown) when password was auto-generated.
-		// Keep-alive shutdown is only needed when the tray app spawns the server as subprocess.
-		managementasset.StartAutoUpdater(context.Background(), configFilePath)
-		registry.StartModelsUpdater(context.Background())
-		if autoGenPassword {
-			cmd.StartServiceStandalone(cfg, configFilePath, password)
+
+		if launchTUI {
+			proxyURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.Port)
+			if standalone {
+				// Standalone mode: start an embedded local server and connect TUI client to it.
+				managementasset.StartAutoUpdater(context.Background(), configFilePath)
+				if !localModel {
+					registry.StartModelsUpdater(context.Background())
+				}
+				origStdout := os.Stdout
+				origStderr := os.Stderr
+				origLogOutput := log.StandardLogger().Out
+				log.SetOutput(io.Discard)
+
+				devNull, errOpenDevNull := os.Open(os.DevNull)
+				if errOpenDevNull == nil {
+					os.Stdout = devNull
+					os.Stderr = devNull
+				}
+
+				restoreIO := func() {
+					os.Stdout = origStdout
+					os.Stderr = origStderr
+					log.SetOutput(origLogOutput)
+					if devNull != nil {
+						_ = devNull.Close()
+					}
+				}
+
+				if password == "" {
+					password = fmt.Sprintf("tui-%d-%d", os.Getpid(), time.Now().UnixNano())
+				}
+
+				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password)
+
+				client := tui.NewClient(proxyURL, password)
+				ready := false
+				backoff := 100 * time.Millisecond
+				for i := 0; i < 30; i++ {
+					if _, errFetchStatus := client.FetchStatus(); errFetchStatus == nil {
+						ready = true
+						break
+					}
+					time.Sleep(backoff)
+					if backoff < time.Second {
+						backoff = time.Duration(float64(backoff) * 1.5)
+					}
+				}
+
+				if !ready {
+					restoreIO()
+					cancel()
+					<-done
+					fmt.Fprintf(os.Stderr, "TUI error: embedded server is not ready\n")
+					return
+				}
+
+				if errRun := tui.RunWithStdio(proxyURL, password, os.Stdin, origStdout); errRun != nil {
+					restoreIO()
+					fmt.Fprintf(os.Stderr, "TUI error: %v\n", errRun)
+				} else {
+					restoreIO()
+				}
+
+				cancel()
+				<-done
+			} else {
+				// Default TUI mode: pure management client.
+				// The proxy server must already be running.
+				if errRun := tui.Run(proxyURL, password); errRun != nil {
+					fmt.Fprintf(os.Stderr, "TUI error: %v\n", errRun)
+				}
+			}
 		} else {
-			cmd.StartService(cfg, configFilePath, password)
+			managementasset.StartAutoUpdater(context.Background(), configFilePath)
+			if !localModel {
+				registry.StartModelsUpdater(context.Background())
+			}
+			if autoGenPassword {
+				cmd.StartServiceStandalone(cfg, configFilePath, password)
+			} else {
+				cmd.StartService(cfg, configFilePath, password)
+			}
 		}
 	}
 }

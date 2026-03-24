@@ -22,8 +22,8 @@ import (
 //   - param: A pointer to a parameter object for maintaining state between calls
 //
 // Returns:
-//   - []string: A slice of strings, each containing an OpenAI Responses-compatible JSON response chunk
-func ConvertKiroResponseToOpenAIResponses(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
+//   - [][]byte: A slice of OpenAI Responses-compatible JSON response chunks
+func ConvertKiroResponseToOpenAIResponses(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	// The executor has already extracted Claude-format events from AWS Event Stream
 	// Now convert those Claude events to OpenAI Responses format
 	return clauderesponses.ConvertClaudeResponseToOpenAIResponses(ctx, modelName, originalRequestRawJSON, requestRawJSON, rawJSON, param)
@@ -42,8 +42,8 @@ func ConvertKiroResponseToOpenAIResponses(ctx context.Context, modelName string,
 //   - param: A pointer to a parameter object for the conversion
 //
 // Returns:
-//   - string: An OpenAI Responses-compatible JSON response
-func ConvertKiroResponseToOpenAIResponsesNonStream(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) string {
+//   - []byte: An OpenAI Responses-compatible JSON response
+func ConvertKiroResponseToOpenAIResponsesNonStream(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []byte {
 	// The executor has already built a Claude-format response from AWS Event Stream
 	// Now convert that Claude response to OpenAI Responses format
 	return clauderesponses.ConvertClaudeResponseToOpenAIResponsesNonStream(ctx, modelName, originalRequestRawJSON, requestRawJSON, rawJSON, param)

@@ -32,7 +32,7 @@ import (
 // OpenAI SSE format:
 //   - data: {"id":"...","object":"chat.completion.chunk",...}
 //   - data: [DONE]
-func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalRequest, request, rawResponse []byte, param *any) []string {
+func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalRequest, request, rawResponse []byte, param *any) [][]byte {
 	// Initialize state if needed
 	if *param == nil {
 		*param = NewOpenAIStreamState(model)
@@ -64,13 +64,13 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 	}
 
 	if eventData == "" {
-		return []string{}
+		return [][]byte{}
 	}
 
 	// Parse the event data as JSON
 	eventJSON := gjson.Parse(eventData)
 	if !eventJSON.Exists() {
-		return []string{}
+		return [][]byte{}
 	}
 
 	// Determine event type from JSON if not already set
@@ -78,13 +78,13 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 		eventType = eventJSON.Get("type").String()
 	}
 
-	var results []string
+	var results [][]byte
 
 	switch eventType {
 	case "message_start":
 		// Send first chunk with role
 		firstChunk := BuildOpenAISSEFirstChunk(state)
-		results = append(results, firstChunk)
+		results = append(results, []byte(firstChunk))
 
 	case "content_block_start":
 		// Check block type
@@ -102,7 +102,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 			blockIndex := int(eventJSON.Get("index").Int())
 			state.ContentBlockTools[blockIndex] = toolIndex
 			chunk := BuildOpenAISSEToolCallStart(state, toolUseID, toolName, toolIndex)
-			results = append(results, chunk)
+			results = append(results, []byte(chunk))
 			state.ToolCallIndex++
 		}
 
@@ -113,14 +113,14 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 			textDelta := eventJSON.Get("delta.text").String()
 			if textDelta != "" {
 				chunk := BuildOpenAISSETextDelta(state, textDelta)
-				results = append(results, chunk)
+				results = append(results, []byte(chunk))
 			}
 		case "thinking_delta":
 			// Convert thinking to reasoning_content for o1-style compatibility
 			thinkingDelta := eventJSON.Get("delta.thinking").String()
 			if thinkingDelta != "" {
 				chunk := BuildOpenAISSEReasoningDelta(state, thinkingDelta)
-				results = append(results, chunk)
+				results = append(results, []byte(chunk))
 			}
 		case "input_json_delta":
 			// Tool call arguments delta
@@ -132,7 +132,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 					toolIndex = blockIndex
 				}
 				chunk := BuildOpenAISSEToolCallArgumentsDelta(state, partialJSON, toolIndex)
-				results = append(results, chunk)
+				results = append(results, []byte(chunk))
 			}
 		}
 
@@ -145,7 +145,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 		finishReason := mapKiroStopReasonToOpenAI(stopReason)
 		if finishReason != "" {
 			chunk := BuildOpenAISSEFinish(state, finishReason)
-			results = append(results, chunk)
+			results = append(results, []byte(chunk))
 		}
 
 		// Extract usage if present
@@ -158,7 +158,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 				TotalTokens:  inputTokens + outputTokens,
 			}
 			chunk := BuildOpenAISSEUsage(state, usageInfo)
-			results = append(results, chunk)
+			results = append(results, []byte(chunk))
 		}
 
 	case "message_stop":
@@ -177,7 +177,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 				TotalTokens:  inputTokens + outputTokens,
 			}
 			chunk := BuildOpenAISSEUsage(state, usageInfo)
-			results = append(results, chunk)
+			results = append(results, []byte(chunk))
 		}
 	}
 
@@ -187,7 +187,7 @@ func ConvertKiroStreamToOpenAI(ctx context.Context, model string, originalReques
 // ConvertKiroNonStreamToOpenAI converts Kiro non-streaming response to OpenAI format.
 // The Kiro executor returns Claude-compatible JSON responses, so this function translates
 // from Claude format to OpenAI format.
-func ConvertKiroNonStreamToOpenAI(ctx context.Context, model string, originalRequest, request, rawResponse []byte, param *any) string {
+func ConvertKiroNonStreamToOpenAI(ctx context.Context, model string, originalRequest, request, rawResponse []byte, param *any) []byte {
 	// Parse the Claude-format response
 	response := gjson.ParseBytes(rawResponse)
 
@@ -243,7 +243,7 @@ func ConvertKiroNonStreamToOpenAI(ctx context.Context, model string, originalReq
 
 	// Build OpenAI response with reasoning_content support
 	openaiResponse := BuildOpenAIResponseWithReasoning(content, reasoningContent, toolUses, model, usageInfo, stopReason)
-	return string(openaiResponse)
+	return openaiResponse
 }
 
 // ParseClaudeEvent parses a Claude SSE event and returns the event type and data

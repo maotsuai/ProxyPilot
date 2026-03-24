@@ -98,13 +98,13 @@ func TestGetTranslationInfo(t *testing.T) {
 	reg.Register(FormatOpenAI, FormatClaude, func(model string, data []byte, stream bool) []byte {
 		return data
 	}, ResponseTransform{
-		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []string {
-			return []string{string(resp)}
+		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) [][]byte {
+			return [][]byte{append([]byte(nil), resp...)}
 		},
-		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) string {
-			return string(resp)
+		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []byte {
+			return append([]byte(nil), resp...)
 		},
-		TokenCount: func(ctx context.Context, count int64) string { return "" },
+		TokenCount: func(ctx context.Context, count int64) []byte { return nil },
 	})
 
 	info := reg.GetTranslationInfo(FormatOpenAI, FormatClaude)
@@ -135,8 +135,8 @@ func TestGetTranslationInfo(t *testing.T) {
 func TestGetTranslationInfo_PartialResponse(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(FormatOpenAI, FormatClaude, nil, ResponseTransform{
-		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []string {
-			return []string{string(resp)}
+		Stream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) [][]byte {
+			return [][]byte{append([]byte(nil), resp...)}
 		},
 		// NonStream and TokenCount not registered
 	})
@@ -169,8 +169,8 @@ func TestGetAllTranslations(t *testing.T) {
 		return data
 	}, ResponseTransform{})
 	reg.Register(FormatGemini, FormatOpenAI, nil, ResponseTransform{
-		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) string {
-			return string(resp)
+		NonStream: func(ctx context.Context, model string, origReq, convReq, resp []byte, param *any) []byte {
+			return append([]byte(nil), resp...)
 		},
 	})
 

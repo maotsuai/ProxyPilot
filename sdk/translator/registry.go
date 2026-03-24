@@ -3,6 +3,10 @@ package translator
 import (
 	"context"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Registry manages translation functions across schemas.
@@ -61,9 +65,10 @@ func (r *Registry) Register(from, to Format, request RequestTransform, response 
 }
 
 // TranslateRequest converts a payload between schemas, returning the original payload
-// if no translator is registered. It also loads lazy transforms on-demand.
+// if no translator is registered. When falling back to the original payload, the
+// "model" field is still updated to match the resolved model name so that
+// client-side prefixes (e.g. "copilot/gpt-5-mini") are not leaked upstream.
 func (r *Registry) TranslateRequest(from, to Format, model string, rawJSON []byte, stream bool) []byte {
-	// First try with read lock
 	r.mu.RLock()
 	if byTarget, ok := r.requests[from]; ok {
 		if fn, isOk := byTarget[to]; isOk && fn != nil {
@@ -72,7 +77,6 @@ func (r *Registry) TranslateRequest(from, to Format, model string, rawJSON []byt
 		}
 	}
 
-	// Check if there's a lazy transform to load
 	var needsLoad bool
 	if byTarget, ok := r.lazyRequests[from]; ok {
 		if entry, isOk := byTarget[to]; isOk && !entry.loaded {
@@ -81,10 +85,8 @@ func (r *Registry) TranslateRequest(from, to Format, model string, rawJSON []byt
 	}
 	r.mu.RUnlock()
 
-	// Load lazy transform if needed
 	if needsLoad {
 		r.mu.Lock()
-		// Double-check after acquiring write lock
 		if byTarget, ok := r.lazyRequests[from]; ok {
 			if entry, isOk := byTarget[to]; isOk && !entry.loaded && entry.loader != nil {
 				fn := entry.loader()
@@ -99,7 +101,6 @@ func (r *Registry) TranslateRequest(from, to Format, model string, rawJSON []byt
 		}
 		r.mu.Unlock()
 
-		// Try again with the loaded transform
 		r.mu.RLock()
 		if byTarget, ok := r.requests[from]; ok {
 			if fn, isOk := byTarget[to]; isOk && fn != nil {
@@ -110,6 +111,14 @@ func (r *Registry) TranslateRequest(from, to Format, model string, rawJSON []byt
 		r.mu.RUnlock()
 	}
 
+	if model != "" && gjson.GetBytes(rawJSON, "model").String() != model {
+		if updated, err := sjson.SetBytes(rawJSON, "model", model); err != nil {
+			log.Warnf("translator: failed to normalize model in request fallback: %v", err)
+		} else {
+			return updated
+		}
+	}
+
 	return rawJSON
 }
 
@@ -118,13 +127,11 @@ func (r *Registry) HasResponseTransformer(from, to Format) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Check eager transforms first
 	if byTarget, ok := r.responses[from]; ok {
 		if _, isOk := byTarget[to]; isOk {
 			return true
 		}
 	}
-	// Check lazy transforms
 	if byTarget, ok := r.lazyResponses[from]; ok {
 		if _, isOk := byTarget[to]; isOk {
 			return true
@@ -134,9 +141,7 @@ func (r *Registry) HasResponseTransformer(from, to Format) bool {
 }
 
 // TranslateStream applies the registered streaming response translator.
-// It also loads lazy response transforms on-demand.
-func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
-	// First try with read lock
+func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	r.mu.RLock()
 	if byTarget, ok := r.responses[to]; ok {
 		if fn, isOk := byTarget[from]; isOk && fn.Stream != nil {
@@ -145,7 +150,6 @@ func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model s
 		}
 	}
 
-	// Check if there's a lazy transform to load
 	var needsLoad bool
 	if byTarget, ok := r.lazyResponses[to]; ok {
 		if entry, isOk := byTarget[from]; isOk && !entry.loaded {
@@ -154,10 +158,8 @@ func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model s
 	}
 	r.mu.RUnlock()
 
-	// Load lazy transform if needed
 	if needsLoad {
 		r.mu.Lock()
-		// Double-check after acquiring write lock
 		if byTarget, ok := r.lazyResponses[to]; ok {
 			if entry, isOk := byTarget[from]; isOk && !entry.loaded && entry.loader != nil {
 				fn := entry.loader()
@@ -170,7 +172,6 @@ func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model s
 		}
 		r.mu.Unlock()
 
-		// Try again with the loaded transform
 		r.mu.RLock()
 		if byTarget, ok := r.responses[to]; ok {
 			if fn, isOk := byTarget[from]; isOk && fn.Stream != nil {
@@ -181,13 +182,11 @@ func (r *Registry) TranslateStream(ctx context.Context, from, to Format, model s
 		r.mu.RUnlock()
 	}
 
-	return []string{string(rawJSON)}
+	return [][]byte{rawJSON}
 }
 
 // TranslateNonStream applies the registered non-stream response translator.
-// It also loads lazy response transforms on-demand.
-func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) string {
-	// First try with read lock
+func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []byte {
 	r.mu.RLock()
 	if byTarget, ok := r.responses[to]; ok {
 		if fn, isOk := byTarget[from]; isOk && fn.NonStream != nil {
@@ -196,7 +195,6 @@ func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, mode
 		}
 	}
 
-	// Check if there's a lazy transform to load
 	var needsLoad bool
 	if byTarget, ok := r.lazyResponses[to]; ok {
 		if entry, isOk := byTarget[from]; isOk && !entry.loaded {
@@ -205,10 +203,8 @@ func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, mode
 	}
 	r.mu.RUnlock()
 
-	// Load lazy transform if needed
 	if needsLoad {
 		r.mu.Lock()
-		// Double-check after acquiring write lock
 		if byTarget, ok := r.lazyResponses[to]; ok {
 			if entry, isOk := byTarget[from]; isOk && !entry.loaded && entry.loader != nil {
 				fn := entry.loader()
@@ -221,7 +217,6 @@ func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, mode
 		}
 		r.mu.Unlock()
 
-		// Try again with the loaded transform
 		r.mu.RLock()
 		if byTarget, ok := r.responses[to]; ok {
 			if fn, isOk := byTarget[from]; isOk && fn.NonStream != nil {
@@ -232,11 +227,11 @@ func (r *Registry) TranslateNonStream(ctx context.Context, from, to Format, mode
 		r.mu.RUnlock()
 	}
 
-	return string(rawJSON)
+	return rawJSON
 }
 
-// TranslateNonStream applies the registered non-stream response translator.
-func (r *Registry) TranslateTokenCount(ctx context.Context, from, to Format, count int64, rawJSON []byte) string {
+// TranslateTokenCount applies the registered token count response translator.
+func (r *Registry) TranslateTokenCount(ctx context.Context, from, to Format, count int64, rawJSON []byte) []byte {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -245,7 +240,7 @@ func (r *Registry) TranslateTokenCount(ctx context.Context, from, to Format, cou
 			return fn.TokenCount(ctx, count)
 		}
 	}
-	return string(rawJSON)
+	return rawJSON
 }
 
 var defaultRegistry = NewRegistry()
@@ -271,17 +266,17 @@ func HasResponseTransformer(from, to Format) bool {
 }
 
 // TranslateStream is a helper on the default registry.
-func TranslateStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
+func TranslateStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	return defaultRegistry.TranslateStream(ctx, from, to, model, originalRequestRawJSON, requestRawJSON, rawJSON, param)
 }
 
 // TranslateNonStream is a helper on the default registry.
-func TranslateNonStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) string {
+func TranslateNonStream(ctx context.Context, from, to Format, model string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []byte {
 	return defaultRegistry.TranslateNonStream(ctx, from, to, model, originalRequestRawJSON, requestRawJSON, rawJSON, param)
 }
 
 // TranslateTokenCount is a helper on the default registry.
-func TranslateTokenCount(ctx context.Context, from, to Format, count int64, rawJSON []byte) string {
+func TranslateTokenCount(ctx context.Context, from, to Format, count int64, rawJSON []byte) []byte {
 	return defaultRegistry.TranslateTokenCount(ctx, from, to, count, rawJSON)
 }
 

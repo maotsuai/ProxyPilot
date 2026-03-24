@@ -23,8 +23,8 @@ import (
 //   - param: A pointer to a parameter object for maintaining state between calls
 //
 // Returns:
-//   - []string: A slice of strings, each containing an OpenAI-compatible JSON response chunk
-func ConvertKiroResponseToOpenAI(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
+//   - [][]byte: A slice of OpenAI-compatible JSON response chunks
+func ConvertKiroResponseToOpenAI(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	// The executor has already extracted Claude-format events from AWS Event Stream
 	// Now convert those Claude events to OpenAI format
 	return claudechatcompletions.ConvertClaudeResponseToOpenAI(ctx, modelName, originalRequestRawJSON, requestRawJSON, rawJSON, param)
@@ -43,14 +43,14 @@ func ConvertKiroResponseToOpenAI(ctx context.Context, modelName string, original
 //   - param: A pointer to a parameter object for the conversion
 //
 // Returns:
-//   - string: An OpenAI-compatible JSON response
-func ConvertKiroResponseToOpenAINonStream(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) string {
+//   - []byte: An OpenAI-compatible JSON response
+func ConvertKiroResponseToOpenAINonStream(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []byte {
 	// The executor has already built a Claude-format response from AWS Event Stream
 	// Now convert that Claude response to OpenAI format
 	return claudechatcompletions.ConvertClaudeResponseToOpenAINonStream(ctx, modelName, originalRequestRawJSON, requestRawJSON, rawJSON, param)
 }
 
 // OpenAITokenCount returns the token count in OpenAI format.
-func OpenAITokenCount(ctx context.Context, count int64) string {
-	return fmt.Sprintf(`{"prompt_tokens":%d}`, count)
+func OpenAITokenCount(ctx context.Context, count int64) []byte {
+	return []byte(fmt.Sprintf(`{"prompt_tokens":%d}`, count))
 }

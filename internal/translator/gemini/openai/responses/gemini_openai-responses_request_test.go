@@ -42,8 +42,8 @@ func TestConvertOpenAIResponsesRequestToGemini_UsesPreviousResponseCacheForFunct
 }`)
 
 	translated := ConvertGeminiResponseToOpenAIResponsesNonStream(context.Background(), "gemini-test", nil, nil, upstreamResponse, nil)
-	callID := gjson.Get(translated, "output.0.call_id").String()
-	responseID := gjson.Get(translated, "id").String()
+	callID := gjson.GetBytes(translated, "output.0.call_id").String()
+	responseID := gjson.GetBytes(translated, "id").String()
 	if callID == "" || responseID == "" {
 		t.Fatalf("expected translated response to contain call id and response id, got body=%s", translated)
 	}

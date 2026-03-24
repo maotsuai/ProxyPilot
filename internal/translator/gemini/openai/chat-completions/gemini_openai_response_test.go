@@ -23,8 +23,8 @@ func TestConvertGeminiResponseToOpenAI_MapsCandidateFinishReasons(t *testing.T) 
 		t.Fatalf("expected 2 chunks, got %d", len(chunks))
 	}
 
-	first := gjson.Parse(chunks[0])
-	second := gjson.Parse(chunks[1])
+	first := gjson.ParseBytes(chunks[0])
+	second := gjson.ParseBytes(chunks[1])
 
 	if got := first.Get("choices.0.finish_reason").String(); got != "length" {
 		t.Fatalf("expected first finish_reason length, got %q chunk=%s", got, chunks[0])
@@ -59,16 +59,16 @@ func TestConvertGeminiResponseToOpenAINonStream_MapsToolAndSafetyFinishReasons(t
 
 	out := ConvertGeminiResponseToOpenAINonStream(context.Background(), "gemini-test", nil, nil, raw, nil)
 
-	if got := gjson.Get(out, "choices.0.finish_reason").String(); got != "tool_calls" {
+	if got := gjson.GetBytes(out, "choices.0.finish_reason").String(); got != "tool_calls" {
 		t.Fatalf("expected candidate 0 finish_reason tool_calls, got %q body=%s", got, out)
 	}
-	if got := gjson.Get(out, "choices.0.native_finish_reason").String(); got != "malformed_function_call" {
+	if got := gjson.GetBytes(out, "choices.0.native_finish_reason").String(); got != "malformed_function_call" {
 		t.Fatalf("expected candidate 0 native_finish_reason malformed_function_call, got %q body=%s", got, out)
 	}
-	if got := gjson.Get(out, "choices.1.finish_reason").String(); got != "content_filter" {
+	if got := gjson.GetBytes(out, "choices.1.finish_reason").String(); got != "content_filter" {
 		t.Fatalf("expected candidate 1 finish_reason content_filter, got %q body=%s", got, out)
 	}
-	if got := gjson.Get(out, "choices.1.native_finish_reason").String(); got != "blocklist" {
+	if got := gjson.GetBytes(out, "choices.1.native_finish_reason").String(); got != "blocklist" {
 		t.Fatalf("expected candidate 1 native_finish_reason blocklist, got %q body=%s", got, out)
 	}
 }

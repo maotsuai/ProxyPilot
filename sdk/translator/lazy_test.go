@@ -89,8 +89,8 @@ func TestRegistryLazy_ResponseLoader(t *testing.T) {
 	reg.RegisterLazyResponse(from, to, func() ResponseTransform {
 		loadCount.Add(1)
 		return ResponseTransform{
-			NonStream: func(ctx context.Context, model string, origReq, req, resp []byte, param *any) string {
-				return "lazy-response"
+			NonStream: func(ctx context.Context, model string, origReq, req, resp []byte, param *any) []byte {
+				return []byte("lazy-response")
 			},
 		}
 	})
