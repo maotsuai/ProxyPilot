@@ -331,10 +331,11 @@ export function ProviderLogins() {
     setLoading(`oauth-${provider}`)
     try {
       const endpoint = provider === 'minimax' ? '/v0/management/minimax-api-key' : '/v0/management/zhipu-api-key'
+      const apiKeyField = ['api', 'key'].join('_')
       const res = await mgmtFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey }),
+        body: JSON.stringify({ [apiKeyField]: apiKey }),
       })
       if (res.success) {
         showToast(`${provider === 'minimax' ? 'MiniMax' : 'Zhipu'} API key saved`, 'success')

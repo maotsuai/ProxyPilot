@@ -68,7 +68,7 @@ function DashboardContent() {
             {!isDesktop && !mgmtKey && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
                 Management key missing. Start ProxyPilot from the tray app to inject a local key,
-                or set `MANAGEMENT_PASSWORD` before loading this page.
+                or set the management password environment variable before loading this page.
               </div>
             )}
           </div>

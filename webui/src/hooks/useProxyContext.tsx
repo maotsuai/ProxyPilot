@@ -74,6 +74,7 @@ export function useProxyContext() {
 export function ProxyProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<ProxyStatus | null>(null)
   const statusRef = useRef<ProxyStatus | null>(null)
+  const servicePreflightCacheRef = useRef<{ at: number; status: ProxyStatus } | null>(null)
   const [mgmtKey, setMgmtKey] = useState<string | null>(null)
   const [authFiles, setAuthFiles] = useState<string[]>([])
   const [loading, setLoading] = useState<string | null>(null)
@@ -81,6 +82,7 @@ export function ProxyProvider({ children }: { children: ReactNode }) {
   const [retryDelay, setRetryDelay] = useState(1200)
   const [wasRunning, setWasRunning] = useState(false)
   const [userStopped, setUserStopped] = useState(false)
+  const SERVICE_PREFLIGHT_CACHE_MS = 5000
 
   const isDesktop = typeof window.pp_status === 'function'
 
@@ -92,40 +94,57 @@ export function ProxyProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const refreshStatus = useCallback(async () => {
-    try {
-      let isRunning = false
-      if (window.pp_status) {
-        const s = await window.pp_status()
-        setStatus(s)
-        statusRef.current = s
-        isRunning = s.running
-      } else {
-        try {
-          const res = await fetch('/healthz')
-          if (!res.ok) {
-            const s = { running: false, port: 0, base_url: location.origin, last_error: res.statusText }
-            setStatus(s)
-            statusRef.current = s
-          } else {
-            const body = await res.json().catch(() => ({}))
-            const s = {
-              running: true,
-              port: body.port || 0,
-              base_url: location.origin,
-              last_error: '',
-            }
-            setStatus(s)
-            statusRef.current = s
-            isRunning = true
+  const fetchServicePreflight = useCallback(async (force = false) => {
+    const cached = servicePreflightCacheRef.current
+    if (!force && cached && cached.status.running && Date.now() - cached.at < SERVICE_PREFLIGHT_CACHE_MS) {
+      return cached.status
+    }
+
+    let nextStatus: ProxyStatus
+    if (window.pp_status) {
+      nextStatus = await window.pp_status()
+    } else {
+      try {
+        const res = await fetch('/healthz')
+        if (!res.ok) {
+          nextStatus = {
+            running: false,
+            port: 0,
+            base_url: location.origin,
+            last_error: res.statusText,
           }
-        } catch (fetchErr) {
-          const s = { running: false, port: 0, base_url: location.origin, last_error: String(fetchErr) }
-          setStatus(s)
-          statusRef.current = s
-          isRunning = false
+        } else {
+          const body = await res.json().catch(() => ({}))
+          nextStatus = {
+            running: true,
+            port: body.port || 0,
+            base_url: location.origin,
+            last_error: '',
+          }
+        }
+      } catch (fetchErr) {
+        nextStatus = {
+          running: false,
+          port: 0,
+          base_url: location.origin,
+          last_error: String(fetchErr),
         }
       }
+    }
+
+    servicePreflightCacheRef.current = nextStatus.running
+      ? { at: Date.now(), status: nextStatus }
+      : null
+
+    return nextStatus
+  }, [SERVICE_PREFLIGHT_CACHE_MS])
+
+  const refreshStatus = useCallback(async (force = false) => {
+    try {
+      const s = await fetchServicePreflight(force)
+      setStatus(s)
+      statusRef.current = s
+      const isRunning = s.running
 
       if (isRunning) {
         setWasRunning(true)
@@ -157,7 +176,7 @@ export function ProxyProvider({ children }: { children: ReactNode }) {
       console.error('Status error:', e)
       setRetryDelay(prev => Math.min(prev * 1.5, 10000))
     }
-  }, [mgmtKey])
+  }, [fetchServicePreflight, mgmtKey, wasRunning, userStopped, isDesktop])
 
   const mgmtFetch = useCallback(async (path: string, opts: RequestInit = {}) => {
     const currentStatus = statusRef.current
@@ -204,7 +223,7 @@ export function ProxyProvider({ children }: { children: ReactNode }) {
     try {
       await action()
       showToast(successMsg, 'success')
-      await refreshStatus()
+      await refreshStatus(true)
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), 'error')
     } finally {
