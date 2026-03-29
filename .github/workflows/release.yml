@@ -58,7 +58,7 @@ jobs:
             $tag = "${{ github.ref_name }}"
             $version = $tag -replace '^v', ''
           }
-          $versionInfo = $version -replace '^v', '' -replace '-dev-', '.'
+          $versionInfo = $version -replace '^v', '' -replace '-dev-0\.', '.' -replace '-dev-', '.'
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           echo "VERSION_INFO=$versionInfo" >> $env:GITHUB_OUTPUT
 

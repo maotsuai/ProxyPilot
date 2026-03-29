@@ -65,7 +65,7 @@ VersionInfoDescription=ProxyPilot Installer - Local AI Proxy
 VersionInfoTextVersion={#AppVersion}
 VersionInfoCopyright=MIT License
 VersionInfoProductName=ProxyPilot
-VersionInfoProductVersion={#AppVersion}
+VersionInfoProductVersion={#VersionInfoVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
