@@ -2,6 +2,9 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef VersionInfoVersion
+  #define VersionInfoVersion AppVersion
+#endif
 #ifndef RepoRoot
   #define RepoRoot ".."
 #endif
@@ -56,7 +59,7 @@ OutputBaseFilename=ProxyPilot-{#AppVersion}-Setup
 AppCopyright=MIT License - ProxyPilot Contributors
 
 ; --- Version Info Embedded in Installer ---
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#VersionInfoVersion}
 VersionInfoCompany=ProxyPilot
 VersionInfoDescription=ProxyPilot Installer - Local AI Proxy
 VersionInfoTextVersion={#AppVersion}
