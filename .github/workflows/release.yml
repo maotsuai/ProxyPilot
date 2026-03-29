@@ -40,35 +40,6 @@ jobs:
           # Build tray app (includes embedded dashboard)
           go build -ldflags="-s -w -H=windowsgui" -o dist/ProxyPilot.exe ./cmd/proxypilot-tray
 
-      - name: Build Installer UI
-        run: |
-          cd installer-ui
-          npm ci
-          npm run build
-
-      - name: Copy Installer UI to cmd/installer
-        run: |
-          # Ensure target directory exists
-          New-Item -ItemType Directory -Force -Path cmd/installer/ui | Out-Null
-          # Copy built UI files
-          Copy-Item -Path installer-ui/dist/* -Destination cmd/installer/ui/ -Recurse -Force
-        shell: pwsh
-
-      - name: Create bundle for installer
-        run: |
-          # Create bundle directory
-          New-Item -ItemType Directory -Force -Path cmd/installer/bundle | Out-Null
-          # Copy files for embedding
-          Copy-Item -Path dist/ProxyPilot.exe -Destination cmd/installer/bundle/
-          Copy-Item -Path config.example.yaml -Destination cmd/installer/bundle/
-          Copy-Item -Path static/icon.ico -Destination cmd/installer/bundle/
-          Copy-Item -Path static/icon.png -Destination cmd/installer/bundle/
-        shell: pwsh
-
-      - name: Build Custom Installer
-        run: |
-          go build -ldflags="-s -w -H=windowsgui" -o dist/ProxyPilot-Installer.exe ./cmd/installer
-
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
@@ -99,7 +70,6 @@ jobs:
           name: windows-release
           path: |
             dist/ProxyPilot.exe
-            dist/ProxyPilot-Installer.exe
             dist/ProxyPilot-*-Setup.exe
 
       - name: Upload to Release
@@ -108,6 +78,4 @@ jobs:
         with:
           files: |
             dist/ProxyPilot.exe
-            dist/ProxyPilot-Installer.exe
             dist/ProxyPilot-${{ steps.version.outputs.VERSION }}-Setup.exe
-            config.example.yaml
