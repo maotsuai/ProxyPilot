@@ -214,6 +214,14 @@ interface AuthFileInfo {
   usage?: UsageStats
 }
 
+interface ManagementConfig {
+  debug?: boolean
+}
+
+interface AuthFilesResponse {
+  files?: AuthFileInfo[]
+}
+
 function formatTokens(n?: number): string {
   if (!n || n === 0) return '—'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -239,7 +247,7 @@ export function ProviderLogins() {
   const [privateOAuth, setPrivateOAuth] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [authFileList, setAuthFileList] = useState<AuthFileInfo[]>([])
-  const [mgmtConfig, setMgmtConfig] = useState<any>(null)
+  const [mgmtConfig, setMgmtConfig] = useState<ManagementConfig | null>(null)
 
   const isRunning = status?.running ?? false
 
@@ -275,9 +283,9 @@ export function ProviderLogins() {
     if (!mgmtKey || !isRunning) return
     ;(async () => {
       try {
-        const cfg = await mgmtFetch('/v0/management/config')
+        const cfg = await mgmtFetch('/v0/management/config') as ManagementConfig
         setMgmtConfig(cfg)
-        const res = await mgmtFetch('/v0/management/auth-files')
+        const res = await mgmtFetch('/v0/management/auth-files') as AuthFilesResponse
         setAuthFileList(res.files || [])
       } catch (e) {
         if (!(e instanceof EngineOfflineError)) {
@@ -285,7 +293,7 @@ export function ProviderLogins() {
         }
       }
     })()
-  }, [mgmtKey, isRunning])
+  }, [isRunning, mgmtFetch, mgmtKey])
 
   const handlePrivateOAuthChange = async (checked: boolean) => {
     try {
